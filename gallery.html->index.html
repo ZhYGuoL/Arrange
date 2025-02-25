@@ -1,0 +1,12 @@
+    <script>
+        function loadRoom(roomFile) {
+            localStorage.setItem('currentRoom', roomFile);
+            window.location.href = '/room.html';  // Changed from index.html
+        }
+
+        function createNewRoom() {
+            // Clear any existing furniture data
+            localStorage.removeItem('currentRoom');
+            window.location.href = '/room.html';  // Changed from index.html
+        }
+    </script> 

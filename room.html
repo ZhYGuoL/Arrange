@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AR Furniture Viewer</title>
+    <script>
+        // Add this before anything else loads
+        if (!localStorage.getItem('currentRoom')) {
+            window.location.href = '/index.html';
+        }
+    </script>
+    <!-- Add Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body { 
+            margin: 0; 
+            overflow: hidden;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+        }
+        
+        canvas { 
+            display: block; 
+        }
+        
+        #ar-overlay { 
+            position: fixed; 
+            width: 100%; 
+            height: 100%; 
+            z-index: 1; 
+        }
+        
+        #furniture-gallery {
+            position: fixed;
+            right: 0;
+            top: 0;
+            width: 250px;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            padding: 15px;
+            box-shadow: -2px 0 10px rgba(0,0,0,0.1);
+            z-index: 2;
+            display: flex;
+            flex-direction: column;
+            box-sizing: border-box;
+        }
+
+        #search-furniture {
+            width: calc(100% - 15px);
+            padding: 8px;
+            margin-bottom: 15px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            background: white;
+        }
+
+        #search-furniture:focus {
+            outline: none;
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 2px rgba(74, 175, 80, 0.2);
+        }
+
+        .furniture-container {
+            flex-grow: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            width: 100%;
+            padding: 0 7px;
+            box-sizing: border-box;
+        }
+
+        .furniture-item {
+            width: 100%;
+            margin-bottom: 15px;
+            cursor: grab;
+            border-radius: 8px;
+            overflow: hidden;
+            transition: transform 0.2s;
+            background: white;
+            padding: 15px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            box-sizing: border-box;
+        }
+
+        .furniture-item:hover {
+            transform: scale(1.05);
+        }
+
+        .furniture-item:active {
+            cursor: grabbing;
+        }
+
+        .furniture-item img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            user-select: none;
+            pointer-events: none;
+            border-radius: 4px;
+        }
+
+        .furniture-item h3 {
+            margin: 8px 0;
+            font-size: 14px;
+            color: #333;
+            text-align: center;
+            font-family: 'JetBrains Mono', 'Courier New', monospace;
+            font-weight: 400;
+        }
+
+        .furniture-item.dragging {
+            opacity: 0.5;
+            transform: scale(0.95);
+        }
+
+        #save-button {
+            position: fixed;
+            top: 15px;
+            right: calc(225px + 45px);
+            padding: 9px 20px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 14px;
+            z-index: 3;
+            transition: background-color 0.3s;
+        }
+
+        #save-button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <button id="save-button">Save & Exit</button>
+    <div id="ar-overlay"></div>
+    <div id="furniture-gallery">
+        <input 
+            type="text" 
+            id="search-furniture" 
+            placeholder="Search furniture..."
+        >
+        <div class="furniture-container"></div>
+    </div>
+    <script type="module" src="/app.js"></script>
+</body>
+</html> 

@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Room Gallery</title>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <script type="module">
+        import * as THREE from 'three';
+        import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+
+        // Function to create a preview scene
+        function createPreview(containerId, modelPath) {
+            const container = document.getElementById(containerId);
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Setup scene
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(
+                60,  // Decreased FOV for closer view
+                width / height,
+                0.1,
+                1000
+            );
+            const renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(width, height);
+            container.appendChild(renderer.domElement);
+
+            // Add lights
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+            directionalLight.position.set(5, 5, 5);
+            scene.add(ambientLight, directionalLight);
+
+            // Load room model
+            const loader = new GLTFLoader();
+            loader.load(
+                modelPath,
+                (gltf) => {
+                    const room = gltf.scene;
+                    
+                    // Scale and center the room
+                    const bbox = new THREE.Box3().setFromObject(room);
+                    const size = bbox.getSize(new THREE.Vector3());
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    
+                    // Increased base scale for larger preview
+                    let scale = 8 / maxDim;  // Changed from 4 to 8
+                    if (modelPath.includes('room2.glb')) {
+                        scale = scale * 0.5;
+                    }
+                    
+                    room.scale.set(scale, scale, scale);
+                    scene.add(room);
+
+                    // Position camera closer to the room
+                    camera.position.set(2, 1.5, 2);  // Moved camera closer
+                    camera.lookAt(0, 0, 0);
+                },
+                undefined,
+                (error) => console.error('Error loading room:', error)
+            );
+
+            // Adjust orbit controls for better preview
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.screenSpacePanning = false;
+            controls.minDistance = 1;  // Allow closer zoom
+            controls.maxDistance = 8;  // Limit max zoom out
+            controls.maxPolarAngle = Math.PI / 2;
+
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            // Handle resize
+            window.addEventListener('resize', () => {
+                const width = container.clientWidth;
+                const height = container.clientHeight;
+                camera.aspect = width / height;
+                camera.updateProjectionMatrix();
+                renderer.setSize(width, height);
+            });
+        }
+
+        // Initialize previews when the page loads
+        window.addEventListener('load', () => {
+            createPreview('preview-room1', './models/room1.glb');
+            createPreview('preview-room2', './models/room2.glb');
+        });
+    </script>
+    <style>
+        body {
+            margin: 0;
+            font-family: 'JetBrains Mono', monospace;
+            background: #f0f0f0;
+        }
+
+        .gallery-container {
+            padding: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .room-card {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            cursor: pointer;
+            transition: transform 0.3s;
+        }
+
+        .room-card:hover {
+            transform: translateY(-5px);
+        }
+
+        .room-preview {
+            width: 100%;
+            height: 200px;
+            background: #eee;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            overflow: hidden;
+        }
+
+        .room-preview canvas {
+            width: 100%;
+            height: 100%;
+        }
+
+        .room-title {
+            font-size: 16px;
+            margin: 0;
+            color: #333;
+        }
+
+        .new-room-button {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 10px 20px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 14px;
+        }
+
+        .new-room-button:hover {
+            background: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <div class="gallery-container">
+        <div class="room-card" onclick="loadRoom('room1.glb')">
+            <div id="preview-room1" class="room-preview"></div>
+            <h2 class="room-title">Room 1</h2>
+        </div>
+        <div class="room-card" onclick="loadRoom('room2.glb')">
+            <div id="preview-room2" class="room-preview"></div>
+            <h2 class="room-title">Room 2</h2>
+        </div>
+    </div>
+    <button class="new-room-button" onclick="createNewRoom()">Create New Room</button>
+
+    <script>
+        function loadRoom(roomFile) {
+            localStorage.setItem('currentRoom', roomFile);
+            window.location.href = '/room.html';
+        }
+
+        function createNewRoom() {
+            localStorage.setItem('currentRoom', 'room1.glb');
+            window.location.href = '/room.html';
+        }
+    </script>
+</body>
+</html> 
