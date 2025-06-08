@@ -862,7 +862,7 @@ class ARFurnitureViewer {
     localStorage.setItem("savedRooms", JSON.stringify(savedRooms));
 
     // Navigate back to gallery page (which is now index.html)
-    window.location.href = "/index.html"; // Changed from gallery.html
+    window.location.href = "./index.html"; // Changed from gallery.html
   }
 
   getFurnitureModelPath(furniture) {

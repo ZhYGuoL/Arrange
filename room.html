@@ -5,7 +5,7 @@
     <script>
         // Add this before anything else loads
         if (!localStorage.getItem('currentRoom')) {
-            window.location.href = '/index.html';
+            window.location.href = './index.html';
         }
     </script>
     <!-- Add Google Fonts -->
@@ -204,7 +204,7 @@
             <button id="redo">Redo</button>
         </div>
     </div>
-    <script type="module" src="/app.js"></script>
+    <script type="module" src="./app.js"></script>
     <script>
         // Add event listener for comment button after the page loads
         window.addEventListener('load', () => {
