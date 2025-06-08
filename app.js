@@ -17,6 +17,16 @@ class FurnitureItem {
   }
 }
 
+// Add new Comment class
+class Comment {
+  constructor(id, position, text, timestamp = Date.now()) {
+    this.id = id;
+    this.position = position; // THREE.Vector3
+    this.text = text;
+    this.timestamp = timestamp;
+  }
+}
+
 class ARFurnitureViewer {
   constructor() {
     this.scene = new THREE.Scene();
@@ -70,6 +80,12 @@ class ARFurnitureViewer {
 
     this.placedFurniture = [];
     this.selectedFurniture = null;
+
+    // Add comment system properties
+    this.comments = [];
+    this.commentMarkers = [];
+    this.isAddingComment = false;
+    this.nextCommentId = 1;
 
     this.raycaster = new THREE.Raycaster();
     this.mouse = new THREE.Vector2();
@@ -131,6 +147,9 @@ class ARFurnitureViewer {
     document
       .getElementById("save-button")
       .addEventListener("click", () => this.saveAndExit());
+
+    // Add comment system event listeners
+    this.setupCommentEventListeners();
   }
 
   init() {
@@ -209,6 +228,9 @@ class ARFurnitureViewer {
     // Add drag and drop event listeners
     this.setupDragAndDrop();
 
+    // Load existing comments for this room
+    this.loadComments();
+
     // Start animation loop
     this.animate();
   }
@@ -230,6 +252,7 @@ class ARFurnitureViewer {
         room.scale.set(scale, scale, scale);
 
         this.scene.add(room);
+        this.roomModel = room; // Store reference for comment placement
         console.log("Room loaded successfully");
 
         // Show appropriate hint based on room
@@ -772,6 +795,7 @@ class ARFurnitureViewer {
   animate() {
     requestAnimationFrame(() => this.animate());
     this.controls.update();
+    this.updateCommentAnimation();
     this.renderer.render(this.scene, this.camera);
   }
 
@@ -808,6 +832,9 @@ class ARFurnitureViewer {
   }
 
   saveAndExit() {
+    // Save comments before exiting
+    this.saveComments();
+
     // Create a save object with room data
     const saveData = {
       roomFile: localStorage.getItem("currentRoom") || "room.glb", // Get current room file
@@ -849,10 +876,668 @@ class ARFurnitureViewer {
     }
     return null;
   }
+
+  // Comment system methods
+  enableCommentMode() {
+    this.isAddingComment = true;
+    document.body.style.cursor = "crosshair";
+    // Show instructions
+    this.showCommentInstructions();
+  }
+
+  disableCommentMode() {
+    this.isAddingComment = false;
+    document.body.style.cursor = "default";
+    this.hideCommentInstructions();
+
+    // Update button text
+    const addCommentBtn = document.getElementById("add-comment");
+    if (addCommentBtn) {
+      addCommentBtn.textContent = "Add Comment";
+    }
+  }
+
+  showCommentInstructions() {
+    let instructions = document.getElementById("comment-instructions");
+    if (!instructions) {
+      instructions = document.createElement("div");
+      instructions.id = "comment-instructions";
+      instructions.innerHTML =
+        "Click anywhere in the room to place a comment. Press ESC to cancel.";
+      instructions.style.cssText = `
+        position: fixed;
+        top: 60px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 10px 20px;
+        border-radius: 5px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        z-index: 1000;
+      `;
+      document.body.appendChild(instructions);
+    }
+    instructions.style.display = "block";
+  }
+
+  hideCommentInstructions() {
+    const instructions = document.getElementById("comment-instructions");
+    if (instructions) {
+      instructions.style.display = "none";
+    }
+  }
+
+  addComment(position, text) {
+    const comment = new Comment(this.nextCommentId++, position, text);
+    this.comments.push(comment);
+    this.createCommentMarker(comment);
+    this.saveComments();
+    return comment;
+  }
+
+  createCommentMarker(comment) {
+    // Create a smaller, more elegant sphere marker
+    const markerGeometry = new THREE.SphereGeometry(0.04, 12, 12);
+    const markerMaterial = new THREE.MeshPhongMaterial({
+      color: 0xff6b35,
+      emissive: 0x331100,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+    marker.position.copy(comment.position);
+    marker.userData = { commentId: comment.id, isCommentMarker: true };
+
+    // Add a subtle ring around the marker for better visibility
+    const ringGeometry = new THREE.RingGeometry(0.05, 0.07, 16);
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: 0xff6b35,
+      transparent: true,
+      opacity: 0.3,
+      side: THREE.DoubleSide,
+    });
+    const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+    ring.position.copy(comment.position);
+    ring.position.y += 0.001; // Slightly above the ground
+    ring.rotation.x = -Math.PI / 2; // Lay flat on ground
+    ring.userData = { commentId: comment.id, isCommentRing: true };
+
+    this.scene.add(marker);
+    this.scene.add(ring);
+    this.commentMarkers.push(marker);
+    this.commentMarkers.push(ring);
+
+    // Create comment label that's initially hidden
+    this.createCommentLabel(comment, marker);
+
+    return marker;
+  }
+
+  createCommentLabel(comment, marker) {
+    // Create a high-resolution canvas for crisp text
+    const canvas = document.createElement("canvas");
+    const context = canvas.getContext("2d");
+    const devicePixelRatio = window.devicePixelRatio || 1;
+    const padding = 12;
+    const fontSize = 11;
+    const lineHeight = 16;
+
+    // Set font first to measure text - make it bold for better visibility
+    context.font = `bold ${fontSize}px JetBrains Mono, monospace`;
+
+    // Calculate text dimensions with word wrapping
+    const words = comment.text.split(" ");
+    const maxWidth = 220;
+    const lines = [];
+    let currentLine = "";
+
+    for (const word of words) {
+      const testLine = currentLine + (currentLine ? " " : "") + word;
+      const metrics = context.measureText(testLine);
+
+      if (metrics.width > maxWidth && currentLine) {
+        lines.push(currentLine);
+        currentLine = word;
+      } else {
+        currentLine = testLine;
+      }
+    }
+    if (currentLine) lines.push(currentLine);
+
+    // Limit to 3 lines to keep it compact
+    const displayLines = lines.slice(0, 3);
+    if (lines.length > 3) {
+      displayLines[2] =
+        displayLines[2].substring(0, displayLines[2].length - 3) + "...";
+    }
+
+    // Calculate canvas size with minimum width for better appearance
+    const textWidth = Math.max(
+      ...displayLines.map((line) => context.measureText(line).width)
+    );
+    const minWidth = 160;
+    const logicalWidth = Math.max(textWidth + padding * 2, minWidth);
+    const logicalHeight = displayLines.length * lineHeight + padding * 2;
+
+    // Set canvas size with device pixel ratio for crisp rendering
+    canvas.width = logicalWidth * devicePixelRatio;
+    canvas.height = logicalHeight * devicePixelRatio;
+    canvas.style.width = logicalWidth + "px";
+    canvas.style.height = logicalHeight + "px";
+
+    // Scale the context to match device pixel ratio
+    context.scale(devicePixelRatio, devicePixelRatio);
+
+    // Redraw with correct font (canvas gets reset) - bold for readability
+    context.font = `bold ${fontSize}px JetBrains Mono, monospace`;
+
+    // Draw shadow for better depth
+    context.shadowColor = "rgba(0, 0, 0, 0.15)";
+    context.shadowBlur = 8;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 2;
+
+    // Draw solid white background with no transparency
+    const cornerRadius = 6;
+    context.fillStyle = "#ffffff";
+    this.drawRoundedRect(
+      context,
+      0,
+      0,
+      logicalWidth,
+      logicalHeight,
+      cornerRadius
+    );
+    context.fill();
+
+    // Add a subtle inner background for extra opacity
+    context.fillStyle = "#ffffff";
+    this.drawRoundedRect(
+      context,
+      1,
+      1,
+      logicalWidth - 2,
+      logicalHeight - 2,
+      cornerRadius - 1
+    );
+    context.fill();
+
+    // Reset shadow for border
+    context.shadowColor = "transparent";
+    context.shadowBlur = 0;
+    context.shadowOffsetX = 0;
+    context.shadowOffsetY = 0;
+
+    // Draw strong border
+    context.strokeStyle = "#ff6b35";
+    context.lineWidth = 3;
+    context.stroke();
+
+    // Configure text rendering for maximum contrast and clarity
+    context.fillStyle = "#000000"; // Pure black
+    context.textAlign = "left";
+    context.textBaseline = "top";
+    context.imageSmoothingEnabled = true;
+    context.textRenderingOptimization = "optimizeLegibility";
+
+    // Add text stroke for extra definition
+    context.strokeStyle = "#000000";
+    context.lineWidth = 0.5;
+
+    // Draw text with stroke for extra boldness
+    displayLines.forEach((line, index) => {
+      const x = padding;
+      const y = padding + index * lineHeight;
+
+      // Fill the text (solid black)
+      context.fillText(line, x, y);
+      // Stroke the text for extra definition
+      context.strokeText(line, x, y);
+    });
+
+    // Create texture and sprite with smooth text rendering
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.needsUpdate = true;
+    texture.generateMipmaps = true; // Enable mipmaps for smooth scaling
+    texture.minFilter = THREE.LinearMipmapLinearFilter; // Smooth text scaling
+    texture.magFilter = THREE.LinearFilter; // Smooth text rendering
+
+    const spriteMaterial = new THREE.SpriteMaterial({
+      map: texture,
+      transparent: true,
+      opacity: 0, // Start hidden
+    });
+    const sprite = new THREE.Sprite(spriteMaterial);
+
+    // Use appropriate scale for good readability
+    const scale = 1.0;
+    sprite.scale.set(
+      logicalWidth * scale * 0.01,
+      logicalHeight * scale * 0.01,
+      1
+    );
+    sprite.position.copy(comment.position);
+    sprite.position.y += 0.2; // Position higher for better visibility
+    sprite.userData = { commentId: comment.id, isCommentLabel: true };
+
+    this.scene.add(sprite);
+    marker.userData.label = sprite;
+  }
+
+  // Helper function to draw rounded rectangles
+  drawRoundedRect(ctx, x, y, width, height, radius) {
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + width - radius, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+    ctx.lineTo(x + width, y + height - radius);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+    ctx.lineTo(x + radius, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+  }
+
+  removeComment(commentId) {
+    // Remove from comments array
+    this.comments = this.comments.filter((c) => c.id !== commentId);
+
+    // Remove marker and label from scene
+    const markerIndex = this.commentMarkers.findIndex(
+      (m) => m.userData.commentId === commentId
+    );
+    if (markerIndex !== -1) {
+      const marker = this.commentMarkers[markerIndex];
+      if (marker.userData.label) {
+        this.scene.remove(marker.userData.label);
+      }
+      this.scene.remove(marker);
+      this.commentMarkers.splice(markerIndex, 1);
+    }
+
+    this.saveComments();
+  }
+
+  updateCommentAnimation() {
+    // Animate comment markers with a subtle pulsing effect
+    const time = Date.now() * 0.003;
+    this.commentMarkers.forEach((marker) => {
+      if (marker.userData.isCommentMarker) {
+        // Gentle pulsing for markers
+        const scale = 1 + Math.sin(time + marker.userData.commentId) * 0.15;
+        marker.scale.setScalar(scale);
+      } else if (marker.userData.isCommentRing) {
+        // Gentle breathing effect for rings
+        const opacity =
+          0.2 + Math.sin(time + marker.userData.commentId * 1.5) * 0.1;
+        marker.material.opacity = opacity;
+      }
+    });
+
+    // Handle hover effects for comment labels
+    this.handleCommentHover();
+  }
+
+  handleCommentHover() {
+    // Check if mouse is over any comment marker
+    if (!this.mouse || !this.camera) return;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+    const intersects = this.raycaster.intersectObjects(
+      this.commentMarkers.filter((m) => m.userData.isCommentMarker)
+    );
+
+    // Hide all labels first with faster transition
+    this.commentMarkers.forEach((marker) => {
+      if (marker.userData.isCommentMarker && marker.userData.label) {
+        const label = marker.userData.label;
+        if (intersects.length === 0 || intersects[0].object !== marker) {
+          // Quickly hide non-hovered labels
+          label.material.opacity = THREE.MathUtils.lerp(
+            label.material.opacity,
+            0,
+            0.2
+          );
+        }
+      }
+    });
+
+    // Show label for hovered marker with immediate full opacity
+    if (intersects.length > 0) {
+      const hoveredMarker = intersects[0].object;
+      if (hoveredMarker.userData.label) {
+        const label = hoveredMarker.userData.label;
+        // Set to full opacity immediately for maximum readability
+        label.material.opacity = 1.0;
+      }
+    }
+  }
+
+  handleCommentClick(event) {
+    // Get click position in 3D space
+    this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    // First check if user clicked on an existing comment marker
+    const commentIntersects = this.raycaster.intersectObjects(
+      this.commentMarkers
+    );
+    if (commentIntersects.length > 0) {
+      const clickedMarker = commentIntersects[0].object;
+      const commentId = clickedMarker.userData.commentId;
+      const comment = this.comments.find((c) => c.id === commentId);
+      if (comment) {
+        this.showCommentViewDialog(comment);
+        return;
+      }
+    }
+
+    // If not adding comment, don't proceed
+    if (!this.isAddingComment) return;
+
+    // Try to intersect with room first, then with a ground plane
+    let intersects = [];
+    if (this.roomModel) {
+      intersects = this.raycaster.intersectObject(this.roomModel, true);
+    }
+
+    // If no room intersection, use ground plane
+    let intersectionPoint = new THREE.Vector3();
+    if (intersects.length > 0) {
+      intersectionPoint = intersects[0].point;
+    } else {
+      // Use a ground plane at y=0
+      const groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      this.raycaster.ray.intersectPlane(groundPlane, intersectionPoint);
+    }
+
+    // Show comment input dialog
+    this.showCommentDialog(intersectionPoint);
+  }
+
+  showCommentDialog(position) {
+    const modal = document.createElement("div");
+    modal.id = "comment-modal";
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+      font-family: 'JetBrains Mono', monospace;
+    `;
+
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    `;
+
+    dialog.innerHTML = `
+      <div style="display: flex; align-items: center; margin-bottom: 20px;">
+        <div style="width: 12px; height: 12px; background: #ff6b35; border-radius: 50%; margin-right: 10px;"></div>
+        <h3 style="margin: 0; color: #333; font-size: 18px;">Add Comment</h3>
+      </div>
+      <textarea id="comment-text" placeholder="Enter your design feedback or suggestions..." style="
+        width: 100%;
+        height: 120px;
+        padding: 16px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 14px;
+        line-height: 1.5;
+        resize: vertical;
+        box-sizing: border-box;
+        background: #fafafa;
+        transition: border-color 0.3s, background-color 0.3s;
+      "></textarea>
+      <div style="margin-top: 20px; text-align: right;">
+        <button id="cancel-comment" style="
+          background: #f5f5f5;
+          color: #666;
+          padding: 12px 24px;
+          border: 1px solid #ddd;
+          border-radius: 6px;
+          margin-right: 12px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 14px;
+          transition: all 0.3s;
+        ">Cancel</button>
+        <button id="save-comment" style="
+          background: #ff6b35;
+          color: white;
+          padding: 12px 24px;
+          border: none;
+          border-radius: 6px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 14px;
+          transition: all 0.3s;
+          font-weight: 500;
+        ">Save Comment</button>
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    const textArea = document.getElementById("comment-text");
+    textArea.focus();
+
+    // Add focus styling
+    textArea.addEventListener("focus", () => {
+      textArea.style.borderColor = "#ff6b35";
+      textArea.style.backgroundColor = "#ffffff";
+    });
+
+    textArea.addEventListener("blur", () => {
+      textArea.style.borderColor = "#e0e0e0";
+      textArea.style.backgroundColor = "#fafafa";
+    });
+
+    // Handle save comment
+    document.getElementById("save-comment").onclick = () => {
+      const text = textArea.value.trim();
+      if (text) {
+        this.addComment(position, text);
+        this.disableCommentMode();
+      }
+      document.body.removeChild(modal);
+    };
+
+    // Handle cancel
+    document.getElementById("cancel-comment").onclick = () => {
+      document.body.removeChild(modal);
+      this.disableCommentMode();
+    };
+
+    // Handle escape key
+    const escapeHandler = (e) => {
+      if (e.key === "Escape") {
+        document.body.removeChild(modal);
+        this.disableCommentMode();
+        document.removeEventListener("keydown", escapeHandler);
+      }
+    };
+    document.addEventListener("keydown", escapeHandler);
+  }
+
+  showCommentViewDialog(comment) {
+    const modal = document.createElement("div");
+    modal.id = "comment-view-modal";
+    modal.style.cssText = `
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      z-index: 2000;
+      font-family: 'JetBrains Mono', monospace;
+    `;
+
+    const dialog = document.createElement("div");
+    dialog.style.cssText = `
+      background: white;
+      padding: 30px;
+      border-radius: 10px;
+      max-width: 400px;
+      width: 90%;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+    `;
+
+    const date = new Date(comment.timestamp).toLocaleString();
+    dialog.innerHTML = `
+      <div style="display: flex; align-items: center; margin-bottom: 20px;">
+        <div style="width: 12px; height: 12px; background: #ff6b35; border-radius: 50%; margin-right: 10px;"></div>
+        <h3 style="margin: 0; color: #333; font-size: 18px;">Comment</h3>
+      </div>
+      <div style="
+        background: #f8f8f8;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 3px solid #ff6b35;
+        margin-bottom: 15px;
+        font-size: 14px;
+        line-height: 1.5;
+        color: #333;
+      ">${comment.text}</div>
+      <div style="font-size: 12px; color: #666; margin-bottom: 20px;">
+        Created: ${date}
+      </div>
+      <div style="text-align: right;">
+        <button id="delete-comment" style="
+          background: #dc3545;
+          color: white;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 5px;
+          margin-right: 10px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 12px;
+        ">Delete</button>
+        <button id="close-comment" style="
+          background: #6c757d;
+          color: white;
+          padding: 10px 20px;
+          border: none;
+          border-radius: 5px;
+          cursor: pointer;
+          font-family: 'JetBrains Mono', monospace;
+          font-size: 12px;
+        ">Close</button>
+      </div>
+    `;
+
+    modal.appendChild(dialog);
+    document.body.appendChild(modal);
+
+    // Handle delete comment
+    document.getElementById("delete-comment").onclick = () => {
+      this.removeComment(comment.id);
+      document.body.removeChild(modal);
+    };
+
+    // Handle close
+    document.getElementById("close-comment").onclick = () => {
+      document.body.removeChild(modal);
+    };
+
+    // Handle escape key
+    const escapeHandler = (e) => {
+      if (e.key === "Escape") {
+        document.body.removeChild(modal);
+        document.removeEventListener("keydown", escapeHandler);
+      }
+    };
+    document.addEventListener("keydown", escapeHandler);
+  }
+
+  saveComments() {
+    const roomKey = localStorage.getItem("currentRoom") || "default";
+    const commentsData = this.comments.map((comment) => ({
+      id: comment.id,
+      position: {
+        x: comment.position.x,
+        y: comment.position.y,
+        z: comment.position.z,
+      },
+      text: comment.text,
+      timestamp: comment.timestamp,
+    }));
+    localStorage.setItem(`comments_${roomKey}`, JSON.stringify(commentsData));
+  }
+
+  loadComments() {
+    const roomKey = localStorage.getItem("currentRoom") || "default";
+    const savedComments = localStorage.getItem(`comments_${roomKey}`);
+    if (savedComments) {
+      const commentsData = JSON.parse(savedComments);
+      commentsData.forEach((data) => {
+        const position = new THREE.Vector3(
+          data.position.x,
+          data.position.y,
+          data.position.z
+        );
+        const comment = new Comment(
+          data.id,
+          position,
+          data.text,
+          data.timestamp
+        );
+        this.comments.push(comment);
+        this.createCommentMarker(comment);
+        if (data.id >= this.nextCommentId) {
+          this.nextCommentId = data.id + 1;
+        }
+      });
+    }
+  }
+
+  setupCommentEventListeners() {
+    // Add click event listener for comment placement
+    this.renderer.domElement.addEventListener("click", (event) => {
+      this.handleCommentClick(event);
+    });
+
+    // Add mouse move listener for hover effects
+    this.renderer.domElement.addEventListener("mousemove", (event) => {
+      this.mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      this.mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+    });
+
+    // Add escape key listener to cancel comment mode
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && this.isAddingComment) {
+        this.disableCommentMode();
+      }
+    });
+  }
 }
 
 // Initialize the viewer
 const viewer = new ARFurnitureViewer();
+window.viewer = viewer; // Make viewer globally accessible
 
 // Handle window resizing
 window.addEventListener("resize", () => viewer.handleResize());
